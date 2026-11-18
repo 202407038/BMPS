@@ -20,7 +20,7 @@ import {
   type OpinionItem,
   type Session,
 } from "@bmps/contracts";
-import { createFallbackState } from "./demo-state";
+import { createFallbackState } from "./demo-state.js";
 
 type ConnectionState = "connecting" | "connected" | "local";
 type ViewMode = "map" | "feed";
