@@ -9,11 +9,15 @@
     "tools/*"
   ],
   "scripts": {
+    "dev": "node tools/run-demo.mjs",
+    "demo": "node tools/run-demo.mjs",
+    "verify": "node tools/verify.mjs",
     "build": "npm run build --workspaces --if-present",
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "dev:server": "npm run dev --workspace @bmps/server",
-    "dev:web": "npm run dev --workspace @bmps/web"
+    "dev:web": "npm run dev --workspace @bmps/web",
+    "demo:reset": "npm run seed --workspace @bmps/demo-seed"
   },
   "engines": {
     "node": ">=22",
