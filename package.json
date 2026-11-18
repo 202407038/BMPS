@@ -1,0 +1,26 @@
+{
+  "name": "bmps",
+  "version": "0.1.0",
+  "private": true,
+  "description": "익명 브레인스토밍·마인드맵 협업 시스템",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:server": "npm run dev --workspace @bmps/server",
+    "dev:web": "npm run dev --workspace @bmps/web"
+  },
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}

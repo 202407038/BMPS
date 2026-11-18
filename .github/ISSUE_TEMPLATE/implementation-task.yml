@@ -1,0 +1,53 @@
+name: BMPS 구현 작업
+description: tasks.md의 하위 작업을 담당자에게 연결합니다.
+title: "[Task ID] 작업 제목"
+labels:
+  - implementation
+body:
+  - type: input
+    id: task-id
+    attributes:
+      label: Task ID
+      description: .kiro/specs/bmps/tasks.md의 하위 작업 번호
+      placeholder: "예: 4.4"
+    validations:
+      required: true
+  - type: input
+    id: requirements
+    attributes:
+      label: Requirements
+      description: 연결된 요구사항 번호
+      placeholder: "예: 2.3–2.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: owner-role
+    attributes:
+      label: 주 담당 역할
+      options:
+        - 팀장(사용자)
+        - 개발자 A
+        - 개발자 B
+        - 개발자 C
+        - 발표·지원 담당
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: 완료 조건
+      description: 결과를 확인할 수 있는 조건을 적습니다.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 선행 작업과 연결 지점
+      description: 필요한 계약, API, 이벤트, 다른 Issue를 적습니다.
+  - type: textarea
+    id: validation
+    attributes:
+      label: 검증 방법
+      description: 실행할 검사 또는 재현 절차를 적습니다.
+    validations:
+      required: true

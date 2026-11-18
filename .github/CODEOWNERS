@@ -1,0 +1,25 @@
+# 팀장: 공통 계약과 협업 설정
+/packages/contracts/                  @202407038
+/.github/                             @202407038
+/.kiro/specs/                         @202407038
+
+# 개발자 A: 세션·실시간·동기화·보존
+/apps/server/src/features/sessions/   @202107051
+/apps/server/src/features/presence/   @202107051
+/apps/server/src/features/sync/       @202107051
+/apps/server/src/features/retention/  @202107051
+
+# 개발자 B: 의견·파일·삭제
+/apps/server/src/features/items/      @202407049
+/apps/server/src/features/files/      @202407049
+/apps/server/src/features/deletion/   @202407049
+
+# 개발자 C: 분석·반응·기능 화면 연결
+/apps/server/src/features/analyses/   @susuji5140
+/apps/server/src/features/reactions/  @susuji5140
+/apps/web/src/features/               @susuji5140
+
+# 발표·지원 담당: 공통 UI·테스트 지원·데모 데이터
+/apps/web/src/components/shared/      @202207068
+/packages/test-support/               @202207068
+/tools/demo-seed/                     @202207068
