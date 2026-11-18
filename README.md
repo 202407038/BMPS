@@ -1,39 +1,72 @@
 # BMPS
 
-익명 참여자가 브레인스토밍과 마인드맵 프로젝트를 함께 진행하는 웹 협업 시스템입니다.
+익명 참여자가 의견을 모으고, 마인드맵과 AI 인사이트로 다음 실행 방향을 정하는 협업 워크스페이스입니다.
 
-## 현재 상태
+## 바로 시연하기
 
-협업용 모노레포 골격과 작업 연계 규칙을 준비했습니다. 기능 구현 범위와 순서는 다음 명세를 기준으로 합니다.
+### 준비
 
-- 요구사항: `.kiro/specs/bmps/requirements.md`
-- 기술 설계: `.kiro/specs/bmps/design.md`
-- 구현·분업 계획: `.kiro/specs/bmps/tasks.md`
-- 팀 협업 흐름: `docs/team-workflow.md`
+- Node.js 20 이상과 npm 10 이상이 필요합니다. Node.js 22 사용을 권장합니다.
+- 저장소 루트에서 한 번만 설치합니다.
+
+```bash
+npm install
+```
+
+### 실행
+
+```bash
+npm run demo
+```
+
+브라우저에서 <http://localhost:5173>을 엽니다. 이 명령은 API 서버(`3000`)와 웹 앱(`5173`)을 함께 실행합니다.
+
+서버 없이 `npm run dev:web`만 실행해도 내장 샘플 데이터로 로컬 데모 모드가 작동합니다.
+
+## 2분 시연 흐름
+
+1. **지역 축제 리브랜딩** 세션에서 세 개의 마인드맵 묶음과 참여자 현황을 보여줍니다.
+2. 아래 작성기에서 **실행 아이디어** 의견을 하나 추가합니다.
+3. **AI로 다시 분석**을 눌러 요약, 의견 연결 후보, 추천 방향을 생성합니다.
+4. 오른쪽의 **함께 결정하기**에서 한 항목에 투표합니다.
+5. **마인드맵/타임라인 전환**, 검색, 파일 미리보기와 새 세션 만들기를 차례로 보여줍니다.
+6. 왼쪽 아래 초기화 버튼 또는 다음 명령으로 원래 상태를 복구합니다.
+
+```bash
+npm run seed
+```
+
+## 검증
+
+```bash
+npm run verify
+```
+
+`verify`는 전체 TypeScript 검사, API 테스트, 프로덕션 빌드를 순서대로 실행합니다.
+
+## 구현된 데모 범위
+
+- 공개/링크 전용 브레인스토밍 세션 생성과 전환
+- 텍스트, HTTP(S) 링크, 최대 20 MB 파일 메타데이터 등록
+- 마인드맵과 타임라인 보기, 의견 검색 및 권한 기반 삭제
+- 분석 스냅샷, 연결 후보, 방향 추천과 참여자 투표
+- 참여자 및 최근 활동 패널
+- 반응형 데스크톱·태블릿·모바일 화면
+- API 연결 실패 시 자동 로컬 데모 전환
+- 결정적 샘플 콘텐츠와 즉시 초기화
+
+## 데모 운영 메모
+
+현재 버전은 발표용 인메모리 MVP입니다. 서버를 다시 시작하면 데이터가 초기화되며, 파일은 실제 바이너리 대신 안전한 메타데이터와 샌드박스 미리보기를 사용합니다. 분석 결과도 외부 AI 호출 없이 재현 가능한 규칙으로 생성합니다.
 
 ## 저장소 구조
 
 ```text
-apps/server                 HTTP/WebSocket 서버
-apps/web                    React 웹 클라이언트
-packages/contracts          공유 API·이벤트·도메인 계약
-packages/test-support       공통 fixture와 mock
-tools/demo-seed             발표·E2E용 결정적 데모 데이터
+apps/server                 Fastify 데모 API와 인메모리 상태
+apps/web                    React 반응형 협업 화면
+packages/contracts          공유 API·도메인 계약과 입력 검증
+packages/test-support       공통 fixture와 mock 기반
+tools/demo-seed             실행 중인 데모 데이터 초기화 도구
 ```
 
-## 로컬 준비
-
-1. Git과 Node.js 22 이상을 설치합니다.
-2. 저장소 루트에서 `npm install`을 실행해 lockfile을 생성합니다.
-3. `.env.example`을 `.env`로 복사하고 로컬 값을 입력합니다. 비밀 값은 커밋하지 않습니다.
-4. `npm run check`, `npm run test`, `npm run build`를 실행합니다.
-
-현재 작업 환경에는 Git, Node.js 및 npm이 없으므로 의존성 설치와 명령 검증은 아직 수행되지 않았습니다.
-
-## 개발 시작
-
-1. 팀장이 `packages/contracts`의 기준 계약을 확정합니다.
-2. 각 담당자는 `.kiro/specs/bmps/tasks.md`의 하위 작업 하나를 선택합니다.
-3. `feature/<task-id>-<topic>` 또는 `support/<task-id>-<topic>` 브랜치를 만듭니다.
-4. 작업 번호와 요구사항 번호를 포함한 PR을 `develop`에 생성합니다.
-5. 다른 팀원 한 명이 검토하고 팀장이 최종 병합합니다.
+상세 요구사항과 설계는 `.kiro/specs/bmps/`에서 확인할 수 있습니다.

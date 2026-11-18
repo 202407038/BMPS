@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { MAX_FILE_SIZE_BYTES, type DemoState } from "@bmps/contracts";
+import assert from "node:assert/strict";
+import { afterEach, describe, it } from "node:test";
+import { MAX_FILE_SIZE_BYTES, type ApiError, type DemoState } from "@bmps/contracts";
 import { buildApp } from "./app.js";
 
 const apps: ReturnType<typeof buildApp>[] = [];
@@ -22,20 +23,20 @@ describe("BMPS demo API", () => {
         cluster: "action",
       },
     });
-    expect(createResponse.statusCode).toBe(201);
+    assert.equal(createResponse.statusCode, 201);
     const created = createResponse.json<DemoState>();
-    expect(created.sessions.find((session) => session.id === "session-campus")?.items).toHaveLength(5);
+    assert.equal(created.sessions.find((session) => session.id === "session-campus")?.items.length, 5);
 
     const analysisResponse = await app.inject({
       method: "POST",
       url: "/api/sessions/session-campus/analyses",
     });
-    expect(analysisResponse.statusCode).toBe(201);
+    assert.equal(analysisResponse.statusCode, 201);
     const analysed = analysisResponse.json<DemoState>();
     const session = analysed.sessions.find((entry) => entry.id === "session-campus");
-    expect(session?.analyses).toHaveLength(1);
-    expect(session?.analyses[0]?.snapshotItemIds).toHaveLength(5);
-    expect(session?.analyses[0]?.directions.length).toBeGreaterThan(0);
+    assert.equal(session?.analyses.length, 1);
+    assert.equal(session?.analyses[0]?.snapshotItemIds.length, 5);
+    assert.ok((session?.analyses[0]?.directions.length ?? 0) > 0);
   });
 
   it("rejects a file larger than 20 MiB without changing state", async () => {
@@ -61,10 +62,10 @@ describe("BMPS demo API", () => {
       },
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ code: "VALIDATION_ERROR" });
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json<ApiError>().code, "VALIDATION_ERROR");
 
     const after = await app.inject({ method: "GET", url: "/api/state" });
-    expect(after.json<DemoState>().sessions[0]?.items).toHaveLength(initialCount ?? 0);
+    assert.equal(after.json<DemoState>().sessions[0]?.items.length, initialCount ?? 0);
   });
 });

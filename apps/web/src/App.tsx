@@ -3,8 +3,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
-  type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import {
@@ -18,86 +19,70 @@ import {
   type DemoState,
   type ItemKind,
   type OpinionItem,
+  type Participant,
   type Session,
 } from "@bmps/contracts";
-import { createFallbackState } from "./demo-state";
+import { createFallbackState } from "./demo-state.js";
 
+type Stage = 1 | 2 | 3;
 type ConnectionState = "connecting" | "connected" | "local";
-type ViewMode = "map" | "feed";
-type InsightTab = "analysis" | "activity";
 type ToastTone = "success" | "error" | "info";
-
 type IconName =
-  | "activity"
   | "arrow"
   | "check"
-  | "chevron"
-  | "clock"
-  | "download"
+  | "close"
   | "external"
   | "file"
   | "globe"
-  | "heart"
-  | "help"
-  | "layers"
   | "link"
-  | "list"
   | "lock"
-  | "map"
-  | "menu"
-  | "message"
-  | "more"
-  | "panel"
   | "plus"
   | "reset"
-  | "search"
   | "send"
   | "share"
   | "sparkles"
   | "text"
   | "trash"
-  | "upload"
-  | "users"
-  | "x";
+  | "upload";
+
+const STAGES: Array<{ id: Stage; label: string }> = [
+  { id: 1, label: "마인드맵 동시 작성" },
+  { id: 2, label: "AI 분석" },
+  { id: 3, label: "선택지 제안 · 결정" },
+];
 
 const CLUSTERS: Array<{
   id: ClusterId;
   label: string;
-  eyebrow: string;
   color: string;
-  number: string;
+  fill: string;
 }> = [
-  { id: "discover", label: "문제 발견", eyebrow: "OBSERVE", color: "#ee6c5f", number: "01" },
-  { id: "experience", label: "핵심 경험", eyebrow: "IMAGINE", color: "#3976e8", number: "02" },
-  { id: "action", label: "실행 아이디어", eyebrow: "MAKE", color: "#16a085", number: "03" },
+  { id: "discover", label: "문제 발견", color: "#4d91e8", fill: "#edf5ff" },
+  { id: "experience", label: "핵심 경험", color: "#2faa78", fill: "#eaf8f1" },
+  { id: "action", label: "실행 아이디어", color: "#ee8b32", fill: "#fff3e8" },
 ];
+
+const NODE_POSITIONS = [
+  { x: 230, y: 102 },
+  { x: 600, y: 70 },
+  { x: 970, y: 102 },
+  { x: 220, y: 414 },
+  { x: 600, y: 440 },
+  { x: 970, y: 414 },
+] as const;
+
+const MAP_SIZE = { width: 1_200, height: 520 } as const;
+const MAP_CENTER = { x: 600, y: 272 } as const;
+const RELATION_COLORS = ["#ffd861", "#8adfc9", "#aebcf8"] as const;
+const DISADVANTAGES = [
+  "여러 참여 주체를 조율해 첫 실행까지 시간이 필요해요.",
+  "다른 핵심 의견이 초기 실험에서 빠질 수 있어요.",
+  "현장 운영 부담과 초기 제작 비용을 확인해야 해요.",
+] as const;
 
 function makeId(prefix: string): string {
   const randomPart = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
   return `${prefix}-${randomPart}`;
-}
-
-function formatFileSize(size: number): string {
-  if (size < 1_024) return `${size} B`;
-  if (size < 1_048_576) return `${Math.round(size / 1_024)} KB`;
-  return `${(size / 1_048_576).toFixed(1)} MB`;
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60_000));
-  if (elapsedMinutes < 1) return "방금 전";
-  if (elapsedMinutes < 60) return `${elapsedMinutes}분 전`;
-  if (elapsedMinutes < 1_440) return `${Math.floor(elapsedMinutes / 60)}시간 전`;
-  return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(date);
-}
-
-function getDomain(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
 }
 
 function cloneState(state: DemoState): DemoState {
@@ -117,7 +102,7 @@ function addSessionLocally(state: DemoState, input: CreateSessionInput): DemoSta
     topic: input.topic,
     accessPolicy: input.accessPolicy,
     hostId: next.currentParticipant.id,
-    accent: ["#6c5ce7", "#16a085", "#ee8b3a", "#3976e8"][next.sessions.length % 4]!,
+    accent: ["#4771f3", "#2faa78", "#ee8b32"][next.sessions.length % 3]!,
     createdAt: new Date().toISOString(),
     participants: [{ ...next.currentParticipant }],
     items: [],
@@ -131,20 +116,21 @@ function addItemLocally(state: DemoState, sessionId: string, input: CreateItemIn
   const next = cloneState(state);
   const session = next.sessions.find((entry) => entry.id === sessionId);
   if (!session) return state;
-  const participant = next.currentParticipant;
+
   const file = input.kind === "FILE"
     ? {
         ...input.file,
         previewable: input.file.mimeType.startsWith("image/") || input.file.mimeType === "application/pdf",
       }
     : null;
+
   session.items.push({
     id: makeId("item"),
     sessionId,
     kind: input.kind,
-    authorId: participant.id,
-    authorName: participant.name,
-    authorColor: participant.color,
+    authorId: next.currentParticipant.id,
+    authorName: next.currentParticipant.name,
+    authorColor: next.currentParticipant.color,
     content: input.content,
     url: input.kind === "LINK" ? input.url : null,
     file,
@@ -170,9 +156,12 @@ function analyseLocally(state: DemoState, sessionId: string): DemoState {
   const session = next.sessions.find((entry) => entry.id === sessionId);
   if (!session || session.items.length === 0) return state;
 
-  const strongest = [...session.items].sort((a, b) => b.reactions.agree - a.reactions.agree).slice(0, 3);
+  const strongest = [...session.items]
+    .sort((a, b) => b.reactions.agree - a.reactions.agree)
+    .slice(0, 3);
   const actionItems = session.items.filter((entry) => entry.cluster === "action");
-  const candidateItems = actionItems.length >= 2 ? actionItems.slice(-3) : strongest;
+  const linkedItems = actionItems.length >= 2 ? actionItems.slice(-3) : strongest;
+
   const analysis: AnalysisResult = {
     id: makeId("analysis"),
     sessionId,
@@ -180,12 +169,12 @@ function analyseLocally(state: DemoState, sessionId: string): DemoState {
     createdAt: new Date().toISOString(),
     snapshotItemIds: session.items.map((entry) => entry.id),
     flowSummary: `${session.items.length}개 의견에서 문제 발견, 경험 구상, 실행 제안의 흐름이 보입니다. 공감이 모인 의견을 가장 작은 현장 실험으로 좁혀볼 수 있습니다.`,
-    linkCandidates: candidateItems.length >= 2
+    linkCandidates: linkedItems.length >= 2
       ? [
           {
             id: makeId("link"),
-            itemIds: candidateItems.map((entry) => entry.id),
-            label: "참여자가 함께 주목한 실행 신호",
+            itemIds: linkedItems.map((entry) => entry.id),
+            label: "함께 주목한 실행 신호",
             rationale: "비슷한 목적의 의견이 반복되고 반응도 높아 하나의 실험 가설로 연결할 수 있습니다.",
             confidence: 88,
           },
@@ -219,6 +208,7 @@ function analyseLocally(state: DemoState, sessionId: string): DemoState {
       currentParticipantVote: null,
     },
   };
+
   session.analyses.push(analysis);
   session.cursor += 1;
   return touchState(next);
@@ -230,7 +220,9 @@ function voteLocally(state: DemoState, analysisId: string, option: string): Demo
     const analysis = session.analyses.find((entry) => entry.id === analysisId);
     if (!analysis) continue;
     const previous = analysis.prompt.currentParticipantVote;
-    if (previous) analysis.prompt.votes[previous] = Math.max(0, (analysis.prompt.votes[previous] ?? 1) - 1);
+    if (previous) {
+      analysis.prompt.votes[previous] = Math.max(0, (analysis.prompt.votes[previous] ?? 1) - 1);
+    }
     analysis.prompt.votes[option] = (analysis.prompt.votes[option] ?? 0) + 1;
     analysis.prompt.currentParticipantVote = option;
     session.cursor += 1;
@@ -239,50 +231,65 @@ function voteLocally(state: DemoState, analysisId: string, option: string): Demo
   return touchState(next);
 }
 
-function Icon({ name, size = 18, className = "" }: { name: IconName; size?: number; className?: string }) {
+function formatFileSize(size: number): string {
+  if (size < 1_024) return `${size} B`;
+  if (size < 1_048_576) return `${Math.round(size / 1_024)} KB`;
+  return `${(size / 1_048_576).toFixed(1)} MB`;
+}
+
+function formatTime(value: string): string {
+  const date = new Date(value);
+  const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60_000));
+  if (minutes < 1) return "방금 전";
+  if (minutes < 60) return `${minutes}분 전`;
+  if (minutes < 1_440) return `${Math.floor(minutes / 60)}시간 전`;
+  return new Intl.DateTimeFormat("ko-KR", { month: "short", day: "numeric" }).format(date);
+}
+
+function getDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+function getItemLabel(item: OpinionItem): string {
+  if (item.content.trim()) return item.content;
+  if (item.kind === "FILE" && item.file) return item.file.name;
+  if (item.kind === "LINK" && item.url) return getDomain(item.url);
+  return "내용 없는 의견";
+}
+
+function clusterFor(id: ClusterId) {
+  return CLUSTERS.find((entry) => entry.id === id) ?? CLUSTERS[2]!;
+}
+
+function participantInitial(participant: Participant | undefined, item: OpinionItem): string {
+  if (participant?.initials) return participant.initials.slice(0, 1);
+  return item.authorName.replace(/^익명\s*/, "").slice(0, 1) || "참";
+}
+
+function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   let content: ReactNode;
   switch (name) {
     case "plus":
-      content = <><path d="M12 5v14M5 12h14" /></>;
-      break;
-    case "search":
-      content = <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>;
-      break;
-    case "users":
-      content = <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></>;
+      content = <path d="M12 5v14M5 12h14" />;
       break;
     case "share":
       content = <><circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" /><path d="m8.6 10.5 6.8-4M8.6 13.5l6.8 4" /></>;
       break;
-    case "map":
-      content = <><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3V6Z" /><path d="M9 3v15M15 6v15" /></>;
-      break;
-    case "list":
-      content = <><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></>;
-      break;
-    case "sparkles":
-      content = <><path d="m12 3-1.2 3.1a4 4 0 0 1-2.3 2.3L5.5 9.5l3 1.2a4 4 0 0 1 2.3 2.3l1.2 3.1 1.2-3.1a4 4 0 0 1 2.3-2.3l3-1.2-3-1.1a4 4 0 0 1-2.3-2.3L12 3Z" /><path d="m19 16-.5 1.3a2 2 0 0 1-1.1 1.1l-1.4.5 1.4.5a2 2 0 0 1 1.1 1.1L19 22l.5-1.5a2 2 0 0 1 1.1-1.1l1.4-.5-1.4-.5a2 2 0 0 1-1.1-1.1L19 16Z" /></>;
-      break;
-    case "lock":
-      content = <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>;
-      break;
-    case "globe":
-      content = <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></>;
-      break;
     case "reset":
       content = <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></>;
       break;
-    case "menu":
-      content = <><path d="M4 7h16M4 12h16M4 17h16" /></>;
-      break;
-    case "x":
-      content = <><path d="m6 6 12 12M18 6 6 18" /></>;
+    case "sparkles":
+      content = <><path d="m12 3-1.2 3.1a4 4 0 0 1-2.3 2.3L5.5 9.5l3 1.2a4 4 0 0 1 2.3 2.3l1.2 3.1 1.2-3.1a4 4 0 0 1 2.3-2.3l3-1.2-3-1.1a4 4 0 0 1-2.3-2.3L12 3Z" /><path d="m19 16-.5 1.3a2 2 0 0 1-1.1 1.1l-1.4.5 1.4.5a2 2 0 0 1 1.1 1.1L19 22l.5-1.5a2 2 0 0 1 1.1-1.1l1.4-.5-1.4-.5a2 2 0 0 1-1.1-1.1L19 16Z" /></>;
       break;
     case "text":
       content = <><path d="M5 4h14M12 4v16M8 20h8" /></>;
       break;
     case "link":
-      content = <><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" /><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1" /></>;
+      content = <><path d="M10 13a5 5 0 0 0 7.1.1l2-2A5 5 0 0 0 12 4l-1.1 1.1" /><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1" /></>;
       break;
     case "file":
       content = <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M8 13h8M8 17h5" /></>;
@@ -290,26 +297,11 @@ function Icon({ name, size = 18, className = "" }: { name: IconName; size?: numb
     case "send":
       content = <><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></>;
       break;
+    case "close":
+      content = <path d="m6 6 12 12M18 6 6 18" />;
+      break;
     case "trash":
       content = <><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v5M14 11v5" /></>;
-      break;
-    case "heart":
-      content = <><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z" /></>;
-      break;
-    case "help":
-      content = <><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.7 2.7 0 1 1 4.2 2.3c-1 .6-1.7 1.1-1.7 2.2M12 17h.01" /></>;
-      break;
-    case "clock":
-      content = <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>;
-      break;
-    case "activity":
-      content = <><path d="M3 12h4l2-6 4 12 2-6h6" /></>;
-      break;
-    case "panel":
-      content = <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>;
-      break;
-    case "chevron":
-      content = <><path d="m9 18 6-6-6-6" /></>;
       break;
     case "upload":
       content = <><path d="M12 16V3M7 8l5-5 5 5" /><path d="M20 15v5H4v-5" /></>;
@@ -317,30 +309,23 @@ function Icon({ name, size = 18, className = "" }: { name: IconName; size?: numb
     case "external":
       content = <><path d="M14 3h7v7M10 14 21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></>;
       break;
-    case "download":
-      content = <><path d="M12 3v13M7 11l5 5 5-5M5 21h14" /></>;
-      break;
     case "check":
-      content = <><path d="m5 12 4 4L19 6" /></>;
-      break;
-    case "message":
-      content = <><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" /></>;
+      content = <path d="m5 12 4 4L19 6" />;
       break;
     case "arrow":
       content = <><path d="M5 12h14M14 7l5 5-5 5" /></>;
       break;
-    case "layers":
-      content = <><path d="m12 2 9 5-9 5-9-5 9-5Z" /><path d="m3 12 9 5 9-5M3 17l9 5 9-5" /></>;
+    case "lock":
+      content = <><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>;
       break;
-    case "more":
-      content = <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></>;
+    case "globe":
+      content = <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></>;
       break;
   }
 
   return (
     <svg
       aria-hidden="true"
-      className={className}
       fill="none"
       height={size}
       viewBox="0 0 24 24"
@@ -355,27 +340,102 @@ function Icon({ name, size = 18, className = "" }: { name: IconName; size?: numb
   );
 }
 
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "textarea:not([disabled])",
+  "select:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+function useDialogFocus<T extends HTMLElement>(onClose: () => void) {
+  const dialogRef = useRef<T>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const getFocusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+      .filter((element) => element.getAttribute("aria-hidden") !== "true" && element.offsetParent !== null);
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      if (dialog.contains(document.activeElement)) return;
+      const preferred = dialog.querySelector<HTMLElement>("[autofocus]");
+      (preferred ?? getFocusable()[0] ?? dialog).focus();
+    });
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = getFocusable();
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
+  return dialogRef;
+}
+
 export function App() {
   const [data, setData] = useState<DemoState>(() => createFallbackState());
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [selectedSessionId, setSelectedSessionId] = useState("session-festival");
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("map");
-  const [insightTab, setInsightTab] = useState<InsightTab>("analysis");
-  const [insightOpen, setInsightOpen] = useState(true);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [createSessionOpen, setCreateSessionOpen] = useState(false);
-  const [previewItem, setPreviewItem] = useState<OpinionItem | null>(null);
-  const [search, setSearch] = useState("");
+  const [stage, setStage] = useState<Stage>(1);
   const [isAnalysing, setIsAnalysing] = useState(false);
+  const [votingOption, setVotingOption] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [createSessionOpen, setCreateSessionOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState<OpinionItem | null>(null);
+  const [previewItem, setPreviewItem] = useState<OpinionItem | null>(null);
   const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dataRef = useRef(data);
+
+  const commitData = (next: DemoState) => {
+    dataRef.current = next;
+    setData(next);
+  };
 
   const notify = (message: string, tone: ToastTone = "success") => {
     setToast({ message, tone });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3_200);
   };
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   useEffect(() => {
     let active = true;
@@ -386,13 +446,14 @@ export function App() {
       })
       .then((next) => {
         if (!active) return;
-        setData(next);
+        commitData(next);
         setConnection("connected");
       })
       .catch(() => {
         if (!active) return;
         setConnection("local");
       });
+
     return () => {
       active = false;
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -400,23 +461,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!data.sessions.some((session) => session.id === selectedSessionId) && data.sessions[0]) {
+    if (!data.sessions.some((entry) => entry.id === selectedSessionId) && data.sessions[0]) {
       setSelectedSessionId(data.sessions[0].id);
     }
   }, [data.sessions, selectedSessionId]);
 
   const session = data.sessions.find((entry) => entry.id === selectedSessionId) ?? data.sessions[0];
+  const visibleItems = useMemo(() => session?.items.slice(-6) ?? [], [session]);
   const latestAnalysis = session?.analyses[session.analyses.length - 1] ?? null;
-  const selectedItem = session?.items.find((entry) => entry.id === selectedItemId) ?? null;
-  const filteredItems = useMemo(() => {
-    if (!session) return [];
-    const query = search.trim().toLocaleLowerCase("ko-KR");
-    if (!query) return session.items;
-    return session.items.filter((entry) =>
-      [entry.content, entry.authorName, entry.url ?? "", entry.file?.name ?? ""]
-        .some((value) => value.toLocaleLowerCase("ko-KR").includes(query)),
-    );
-  }, [search, session]);
 
   async function mutate(
     endpoint: string,
@@ -424,30 +476,39 @@ export function App() {
     localFallback: (current: DemoState) => DemoState,
   ): Promise<DemoState> {
     if (connection === "connected") {
+      let response: Response | null = null;
       try {
-        const response = await fetch(endpoint, {
+        response = await fetch(endpoint, {
           ...init,
           headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
         });
-        const payload = (await response.json()) as DemoState | ApiError;
-        if (!response.ok) {
-          throw new Error("message" in payload ? payload.message : "요청을 처리하지 못했습니다.");
-        }
-        const next = payload as DemoState;
-        setData(next);
-        return next;
-      } catch (error) {
-        if (error instanceof Error && !error.message.includes("fetch")) {
-          notify(error.message, "error");
-          throw error;
-        }
+      } catch {
         setConnection("local");
         notify("서버 연결이 끊겨 로컬 데모 모드로 전환했습니다.", "info");
       }
+
+      if (response) {
+        let payload: DemoState | ApiError;
+        try {
+          payload = await response.json() as DemoState | ApiError;
+        } catch {
+          const message = "서버 응답을 읽지 못했습니다.";
+          notify(message, "error");
+          throw new Error(message);
+        }
+        if (!response.ok) {
+          const message = "message" in payload ? payload.message : "요청을 처리하지 못했습니다.";
+          notify(message, "error");
+          throw new Error(message);
+        }
+        const next = payload as DemoState;
+        commitData(next);
+        return next;
+      }
     }
 
-    const next = localFallback(data);
-    setData(next);
+    const next = localFallback(dataRef.current);
+    commitData(next);
     return next;
   }
 
@@ -459,52 +520,54 @@ export function App() {
 
   const selectSession = (id: string) => {
     setSelectedSessionId(id);
-    setSelectedItemId(null);
-    setSearch("");
-    setMobileSidebarOpen(false);
+    setStage(1);
+    setDetailItem(null);
   };
 
-  const handleCreateSession = async (input: CreateSessionInput) => {
-    const next = await mutate(
-      "/api/sessions",
-      { method: "POST", body: JSON.stringify(input) },
-      (current) => addSessionLocally(current, input),
-    );
-    const created = next.sessions[0];
-    if (created) selectSession(created.id);
-    setCreateSessionOpen(false);
-    notify("새 세션을 만들었습니다.");
-  };
-
-  const handleAddItem = async (input: CreateItemInput): Promise<boolean> => {
+  const handleCreateSession = async (input: CreateSessionInput): Promise<boolean> => {
     try {
       const next = await mutate(
-        `/api/sessions/${session.id}/items`,
+        "/api/sessions",
         { method: "POST", body: JSON.stringify(input) },
-        (current) => addItemLocally(current, session.id, input),
+        (current) => addSessionLocally(current, input),
       );
-      const updatedSession = next.sessions.find((entry) => entry.id === session.id);
-      const created = updatedSession?.items[updatedSession.items.length - 1];
-      if (created) setSelectedItemId(created.id);
-      notify("의견이 맵에 추가되었습니다.");
+      const created = next.sessions[0];
+      if (created) selectSession(created.id);
+      setCreateSessionOpen(false);
+      setComposerOpen(true);
+      notify("새 브레인스토밍을 만들었습니다.");
       return true;
     } catch {
       return false;
     }
   };
 
-  const handleDeleteItem = async (itemId: string) => {
-    if (!window.confirm("이 의견을 삭제할까요? 데모 초기화로 다시 복원할 수 있습니다.")) return;
+  const handleAddItem = async (input: CreateItemInput): Promise<boolean> => {
+    try {
+      await mutate(
+        `/api/sessions/${session.id}/items`,
+        { method: "POST", body: JSON.stringify(input) },
+        (current) => addItemLocally(current, session.id, input),
+      );
+      notify("의견을 마인드맵에 추가했습니다.");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleDeleteItem = async (itemId: string): Promise<boolean> => {
+    if (!window.confirm("이 의견을 삭제할까요? 데모 초기화로 다시 복원할 수 있습니다.")) return false;
     try {
       await mutate(
         `/api/sessions/${session.id}/items/${itemId}`,
         { method: "DELETE" },
         (current) => deleteItemLocally(current, session.id, itemId),
       );
-      if (selectedItemId === itemId) setSelectedItemId(null);
       notify("의견을 삭제했습니다.", "info");
+      return true;
     } catch {
-      // The API error is already shown by mutate.
+      return false;
     }
   };
 
@@ -513,9 +576,8 @@ export function App() {
       notify("분석할 의견을 먼저 추가해 주세요.", "error");
       return;
     }
+    if (isAnalysing) return;
     setIsAnalysing(true);
-    setInsightOpen(true);
-    setInsightTab("analysis");
     await new Promise((resolve) => setTimeout(resolve, 850));
     try {
       await mutate(
@@ -523,24 +585,28 @@ export function App() {
         { method: "POST" },
         (current) => analyseLocally(current, session.id),
       );
-      notify("새 분석이 준비되었습니다.");
+      notify("AI가 의견 사이의 연결과 선택지를 정리했습니다.");
     } catch {
-      // The API error is already shown by mutate.
+      // mutate already displays the API error.
     } finally {
       setIsAnalysing(false);
     }
   };
 
   const handleVote = async (analysisId: string, option: string) => {
+    if (votingOption) return;
+    setVotingOption(option);
     try {
       await mutate(
         `/api/analyses/${analysisId}/reactions`,
         { method: "POST", body: JSON.stringify({ option }) },
         (current) => voteLocally(current, analysisId, option),
       );
-      notify("의견을 반영했습니다.");
+      notify("선택을 투표에 반영했습니다.");
     } catch {
-      // The API error is already shown by mutate.
+      // mutate already displays the API error.
+    } finally {
+      setVotingOption(null);
     }
   };
 
@@ -557,213 +623,126 @@ export function App() {
   const handleReset = async () => {
     if (!window.confirm("추가한 데모 내용을 지우고 처음 상태로 되돌릴까요?")) return;
     try {
-      const next = await mutate(
-        "/api/reset",
-        { method: "POST" },
-        () => createFallbackState(),
-      );
+      const next = await mutate("/api/reset", { method: "POST" }, () => createFallbackState());
       setSelectedSessionId(next.sessions[0]?.id ?? "session-festival");
-      setSelectedItemId(null);
+      setStage(1);
+      setDetailItem(null);
       notify("데모 데이터를 초기화했습니다.", "info");
     } catch {
-      // The API error is already shown by mutate.
+      // mutate already displays the API error.
     }
   };
 
   return (
-    <div className={`app-frame ${mobileSidebarOpen ? "sidebar-is-open" : ""}`}>
-      <aside className="sidebar" aria-label="세션 탐색">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true">
-            <span />
-            <span />
-            <span />
+    <div className="brainstorm-app">
+      <header className="app-header">
+        <div className="header-left">
+          <div className="brand-line">
+            <h1>AI 브레인스토밍</h1>
+            <span className="brand-tag">BMPS</span>
           </div>
-          <div>
-            <strong>BMPS</strong>
-            <span>Think better, together.</span>
-          </div>
-        </div>
-
-        <div className="sidebar-section-heading">
-          <span>워크스페이스</span>
-          <button className="icon-button sidebar-add" onClick={() => setCreateSessionOpen(true)} aria-label="새 세션 만들기">
-            <Icon name="plus" size={16} />
-          </button>
-        </div>
-
-        <nav className="session-list">
-          {data.sessions.map((entry) => {
-            const active = entry.id === session.id;
-            const latest = entry.items[entry.items.length - 1];
-            return (
-              <button
-                className={`session-nav-item ${active ? "active" : ""}`}
-                key={entry.id}
-                onClick={() => selectSession(entry.id)}
-              >
-                <span className="session-accent" style={{ background: entry.accent }} />
-                <span className="session-nav-copy">
-                  <strong>{entry.title}</strong>
-                  <span>{latest ? formatTime(latest.createdAt) : "아직 의견 없음"}</span>
-                </span>
-                <span className="session-count">{entry.items.length}</span>
+          <div className="session-tools">
+            <label className="visually-hidden" htmlFor="session-select">브레인스토밍 세션</label>
+            <span className="session-select-wrap">
+              <i style={{ background: session.accent }} />
+              <select id="session-select" value={session.id} onChange={(event) => selectSession(event.target.value)}>
+                {data.sessions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}
+              </select>
+            </span>
+            <button className="tool-icon" onClick={() => setCreateSessionOpen(true)} aria-label="새 세션 만들기" title="새 세션">
+              <Icon name="plus" size={15} />
+            </button>
+            <button className="tool-icon" onClick={handleInvite} aria-label="초대 링크 복사" title="초대 링크 복사">
+              <Icon name="share" size={14} />
+            </button>
+            <button className="tool-icon" onClick={handleReset} aria-label="데모 초기화" title="데모 초기화">
+              <Icon name="reset" size={14} />
+            </button>
+            <span className={`connection-state ${connection}`} title={connection === "connected" ? "데모 서버 연결됨" : connection === "connecting" ? "연결 확인 중" : "로컬 데모 모드"}>
+              <i />
+              {connection === "connected" ? "연결됨" : connection === "connecting" ? "연결 중" : "로컬"}
+            </span>
+            <span className="tool-divider" />
+            {stage === 1 ? (
+              <button className="context-action" onClick={() => setComposerOpen(true)}>
+                <Icon name="plus" size={15} /> 의견 추가
               </button>
-            );
-          })}
+            ) : (
+              <button className="context-action analyse" onClick={handleAnalyse} disabled={isAnalysing || session.items.length === 0}>
+                <Icon name="sparkles" size={15} /> {isAnalysing ? "분석 중…" : latestAnalysis ? "다시 분석" : "AI 분석"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <nav className="stage-stepper" aria-label="브레인스토밍 단계">
+          {STAGES.map((entry) => (
+            <button
+              key={entry.id}
+              className={stage === entry.id ? "active" : ""}
+              onClick={() => setStage(entry.id)}
+              aria-current={stage === entry.id ? "step" : undefined}
+            >
+              <b>{entry.id}</b>
+              <span>{entry.label}</span>
+            </button>
+          ))}
         </nav>
+      </header>
 
-        <button className="new-session-button" onClick={() => setCreateSessionOpen(true)}>
-          <Icon name="plus" size={17} />
-          새 브레인스토밍
-        </button>
-
-        <div className="demo-guide">
-          <span className="demo-guide-label"><Icon name="sparkles" size={13} /> 빠른 시연</span>
-          <strong>의견을 하나 추가해 보세요</strong>
-          <p>AI가 기존 의견과 연결해 다음 방향을 제안합니다.</p>
-          <span className="demo-step"><b>1</b> 추가 <i /> <b>2</b> 분석 <i /> <b>3</b> 투표</span>
-        </div>
-
-        <div className="sidebar-footer">
-          <div className="connection-row">
-            <span className={`connection-dot ${connection}`} />
-            <span>{connection === "connected" ? "데모 서버 연결됨" : connection === "connecting" ? "연결 확인 중" : "로컬 데모 모드"}</span>
-          </div>
-          <div className="profile-row">
-            <span className="avatar current" style={{ background: data.currentParticipant.color }}>나</span>
-            <span className="profile-copy"><strong>{data.currentParticipant.name}</strong><small>익명 참여자</small></span>
-            <button className="icon-button dark" onClick={handleReset} aria-label="데모 초기화" title="데모 초기화">
-              <Icon name="reset" size={16} />
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      <button className="sidebar-scrim" aria-label="메뉴 닫기" onClick={() => setMobileSidebarOpen(false)} />
-
-      <main className="workspace">
-        <header className="topbar">
-          <div className="title-group">
-            <button className="icon-button mobile-menu" onClick={() => setMobileSidebarOpen(true)} aria-label="세션 메뉴 열기">
-              <Icon name="menu" />
-            </button>
-            <div>
-              <div className="title-line">
-                <h1>{session.title}</h1>
-                <span className={`access-badge ${session.accessPolicy.toLowerCase()}`}>
-                  <Icon name={session.accessPolicy === "PUBLIC" ? "globe" : "lock"} size={12} />
-                  {session.accessPolicy === "PUBLIC" ? "공개" : "링크 전용"}
-                </span>
-              </div>
-              <p>{session.topic}</p>
-            </div>
-          </div>
-
-          <div className="topbar-actions">
-            <div className="save-state"><Icon name="check" size={14} /> 모든 변경사항 저장됨</div>
-            <div className="participant-stack" aria-label={`${onlineCount}명 온라인`}>
-              {session.participants.slice(0, 4).map((participant) => (
-                <span className="avatar" key={participant.id} style={{ background: participant.color }} title={participant.name}>
-                  {participant.initials}
-                </span>
-              ))}
-              {session.participants.length > 4 && <span className="avatar overflow">+{session.participants.length - 4}</span>}
-            </div>
-            <span className="online-copy"><b>{onlineCount}</b>명 참여 중</span>
-            <button className="primary-button invite-button" onClick={handleInvite}>
-              <Icon name="share" size={16} /> 초대
-            </button>
-          </div>
-        </header>
-
-        <div className="view-toolbar">
-          <div className="segmented-control" aria-label="보기 방식">
-            <button className={viewMode === "map" ? "active" : ""} onClick={() => setViewMode("map")}>
-              <Icon name="map" size={16} /> 마인드맵
-            </button>
-            <button className={viewMode === "feed" ? "active" : ""} onClick={() => setViewMode("feed")}>
-              <Icon name="list" size={16} /> 타임라인
-            </button>
-          </div>
-          <div className="toolbar-divider" />
-          <label className="search-box">
-            <Icon name="search" size={16} />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="의견 검색" aria-label="의견 검색" />
-            {search && <button onClick={() => setSearch("")} aria-label="검색어 지우기"><Icon name="x" size={13} /></button>}
-          </label>
-          <div className="toolbar-spacer" />
-          <span className="item-total"><b>{session.items.length}</b>개의 의견</span>
-          <button
-            className={`panel-toggle ${insightOpen ? "active" : ""}`}
-            onClick={() => setInsightOpen((open) => !open)}
-            aria-pressed={insightOpen}
-          >
-            <Icon name="panel" size={16} /> 인사이트 패널
-          </button>
-        </div>
-
-        <div className={`workspace-grid ${insightOpen ? "" : "insight-closed"}`}>
-          <section className="board-panel" aria-label="브레인스토밍 보드">
-            <div className="board-heading">
-              <div>
-                <span className="eyebrow"><span className="live-pulse" /> LIVE BOARD</span>
-                <h2>{viewMode === "map" ? "아이디어가 연결되는 흐름" : "모든 의견을 시간순으로"}</h2>
-              </div>
-              <div className="board-heading-actions">
-                <span className="last-update"><Icon name="clock" size={14} /> 방금 동기화</span>
-                <button className="analyse-button compact" onClick={handleAnalyse} disabled={isAnalysing || session.items.length === 0}>
-                  <Icon name="sparkles" size={15} /> {isAnalysing ? "분석 중…" : "AI로 다시 분석"}
-                </button>
-              </div>
-            </div>
-
-            <div className="board-content">
-              {viewMode === "map" ? (
-                <MindMap
-                  session={session}
-                  items={filteredItems}
-                  selectedItemId={selectedItemId}
-                  currentParticipantId={data.currentParticipant.id}
-                  onSelect={setSelectedItemId}
-                  onDelete={handleDeleteItem}
-                  onPreview={setPreviewItem}
-                />
-              ) : (
-                <FeedView
-                  session={session}
-                  items={filteredItems}
-                  selectedItemId={selectedItemId}
-                  currentParticipantId={data.currentParticipant.id}
-                  onSelect={setSelectedItemId}
-                  onDelete={handleDeleteItem}
-                  onPreview={setPreviewItem}
-                />
-              )}
-            </div>
-
-            <Composer sessionId={session.id} onSubmit={handleAddItem} />
-          </section>
-
-          {insightOpen && (
-            <InsightPanel
-              session={session}
-              analysis={latestAnalysis}
-              selectedItem={selectedItem}
-              tab={insightTab}
-              isAnalysing={isAnalysing}
-              onTabChange={setInsightTab}
-              onAnalyse={handleAnalyse}
-              onVote={handleVote}
-              onSelectItem={setSelectedItemId}
-              onClose={() => setInsightOpen(false)}
-            />
-          )}
-        </div>
+      <main className="stage-main">
+        {stage === 1 || stage === 2 ? (
+          <MindMapStage
+            key={`${session.id}-${stage}`}
+            stage={stage}
+            session={session}
+            items={visibleItems}
+            analysis={latestAnalysis}
+            onlineCount={onlineCount}
+            isAnalysing={isAnalysing}
+            onOpenComposer={() => setComposerOpen(true)}
+            onOpenItem={setDetailItem}
+          />
+        ) : (
+          <DecisionStage
+            session={session}
+            analysis={latestAnalysis}
+            isAnalysing={isAnalysing}
+            votingOption={votingOption}
+            onAnalyse={handleAnalyse}
+            onVote={handleVote}
+          />
+        )}
       </main>
 
+      {composerOpen && (
+        <IdeaComposerModal
+          session={session}
+          onClose={() => setComposerOpen(false)}
+          onSubmit={handleAddItem}
+        />
+      )}
       {createSessionOpen && (
-        <CreateSessionModal onClose={() => setCreateSessionOpen(false)} onCreate={handleCreateSession} />
+        <CreateSessionModal
+          onClose={() => setCreateSessionOpen(false)}
+          onCreate={handleCreateSession}
+        />
+      )}
+      {detailItem && (
+        <ItemDetailModal
+          item={detailItem}
+          session={session}
+          currentParticipantId={data.currentParticipant.id}
+          onClose={() => setDetailItem(null)}
+          onDelete={async () => {
+            const deleted = await handleDeleteItem(detailItem.id);
+            if (deleted) setDetailItem(null);
+          }}
+          onPreview={() => {
+            setDetailItem(null);
+            setPreviewItem(detailItem);
+          }}
+        />
       )}
       {previewItem?.file && (
         <FilePreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
@@ -773,179 +752,295 @@ export function App() {
   );
 }
 
-interface ItemViewProps {
+interface MindMapStageProps {
+  stage: 1 | 2;
   session: Session;
   items: OpinionItem[];
-  selectedItemId: string | null;
-  currentParticipantId: string;
-  onSelect: (id: string) => void;
-  onDelete: (id: string) => void;
-  onPreview: (item: OpinionItem) => void;
+  analysis: AnalysisResult | null;
+  onlineCount: number;
+  isAnalysing: boolean;
+  onOpenComposer: () => void;
+  onOpenItem: (item: OpinionItem) => void;
 }
 
-function MindMap(props: ItemViewProps) {
-  const { session, items, selectedItemId, currentParticipantId, onSelect, onDelete, onPreview } = props;
-  if (session.items.length === 0) {
-    return (
-      <div className="board-empty">
-        <div className="empty-orbit"><span /><span /><span /><Icon name="sparkles" size={26} /></div>
-        <span className="empty-kicker">첫 번째 생각을 기다리고 있어요</span>
-        <h3>작은 의견 하나에서 시작해 보세요</h3>
-        <p>아래 입력창에 생각을 남기면 이 공간에 연결 지도가 만들어집니다.</p>
-      </div>
-    );
-  }
+interface MapRelation {
+  id: string;
+  label: string;
+  confidence: number;
+  indices: number[];
+  color: string;
+  path: string;
+  x: number;
+  y: number;
+}
 
-  if (items.length === 0) {
-    return <div className="search-empty"><Icon name="search" size={24} /><strong>일치하는 의견이 없습니다</strong><span>다른 검색어를 입력해 보세요.</span></div>;
-  }
+function MindMapStage({
+  stage,
+  session,
+  items,
+  analysis,
+  onlineCount,
+  isAnalysing,
+  onOpenComposer,
+  onOpenItem,
+}: MindMapStageProps) {
+  const relations: MapRelation[] = stage === 2 && analysis
+    ? analysis.linkCandidates.slice(0, 3).flatMap((candidate, relationIndex) => {
+        const indices = [...new Set(candidate.itemIds
+          .map((itemId) => items.findIndex((item) => item.id === itemId))
+          .filter((index) => index >= 0))];
+        if (indices.length < 2) return [];
+        const points = indices.map((index) => NODE_POSITIONS[index]!);
+        const averageX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+        const averageY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+        const closeToTopic = Math.abs(averageX - MAP_CENTER.x) < 230 && Math.abs(averageY - MAP_CENTER.y) < 105;
+        const labelOffset = closeToTopic
+          ? [{ x: -110, y: 0 }, { x: 0, y: -92 }, { x: 110, y: 0 }][relationIndex % 3]!
+          : { x: 0, y: 0 };
+        return [{
+          id: candidate.id,
+          label: candidate.label,
+          confidence: candidate.confidence,
+          indices,
+          color: RELATION_COLORS[relationIndex % RELATION_COLORS.length]!,
+          path: points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" "),
+          x: averageX + labelOffset.x,
+          y: averageY + labelOffset.y,
+        }];
+      })
+    : [];
+
+  const cursorIndices = [...new Set([0, Math.min(2, items.length - 1), items.length - 1])]
+    .filter((index) => index >= 0 && index < items.length)
+    .slice(0, 3);
+
+  const caption = stage === 1
+    ? `${onlineCount}명이 같은 마인드맵에 동시에 접속해 아이디어를 추가 중`
+    : isAnalysing
+      ? "AI가 비슷한 의견을 찾아 묶는 중..."
+      : analysis
+        ? `AI가 ${analysis.linkCandidates.length}개의 의견 관계와 ${analysis.directions.length}개의 방향을 찾았어요`
+        : "AI 분석을 실행하면 비슷한 의견의 연결이 나타나요";
 
   return (
-    <div className="map-viewport">
-      <div className="map-canvas">
-        <div className="topic-node">
-          <span className="topic-node-icon"><Icon name="layers" size={18} /></span>
-          <div><small>OUR QUESTION</small><strong>{session.topic}</strong></div>
-          <span className="topic-node-count">{session.items.length}</span>
-        </div>
-        <svg className="map-connectors" viewBox="0 0 1000 145" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M500 10 C500 86 168 44 168 142" />
-          <path d="M500 10 C500 70 500 70 500 142" />
-          <path d="M500 10 C500 86 832 44 832 142" />
-          <circle cx="168" cy="142" r="4" />
-          <circle cx="500" cy="142" r="4" />
-          <circle cx="832" cy="142" r="4" />
-        </svg>
-        <div className="cluster-grid">
-          {CLUSTERS.map((cluster) => {
-            const entries = items.filter((entry) => entry.cluster === cluster.id);
+    <section className={`mindmap-stage stage-${stage}`} aria-labelledby="map-topic">
+      <div className="map-plane">
+        <svg className="idea-lines" viewBox={`0 0 ${MAP_SIZE.width} ${MAP_SIZE.height}`} preserveAspectRatio="none" aria-hidden="true">
+          {items.map((item, index) => {
+            const position = NODE_POSITIONS[index];
+            if (!position) return null;
             return (
-              <section className="cluster-column" key={cluster.id} style={{ "--cluster-color": cluster.color } as React.CSSProperties}>
-                <div className="cluster-heading">
-                  <span className="cluster-number">{cluster.number}</span>
-                  <span className="cluster-title"><small>{cluster.eyebrow}</small><strong>{cluster.label}</strong></span>
-                  <span className="cluster-count">{entries.length}</span>
-                </div>
-                <div className="idea-stack">
-                  {entries.map((entry) => (
-                    <IdeaCard
-                      item={entry}
-                      key={entry.id}
-                      compact
-                      selected={entry.id === selectedItemId}
-                      canDelete={entry.authorId === currentParticipantId || session.hostId === currentParticipantId}
-                      onSelect={() => onSelect(entry.id)}
-                      onDelete={() => onDelete(entry.id)}
-                      onPreview={() => onPreview(entry)}
-                    />
-                  ))}
-                  {entries.length === 0 && <div className="cluster-empty"><Icon name="plus" size={15} /> 의견을 추가해 보세요</div>}
-                </div>
-              </section>
+              <line
+                key={item.id}
+                x1={MAP_CENTER.x}
+                y1={MAP_CENTER.y}
+                x2={position.x}
+                y2={position.y}
+                stroke={clusterFor(item.cluster).color}
+              />
             );
           })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FeedView(props: ItemViewProps) {
-  const { session, items, selectedItemId, currentParticipantId, onSelect, onDelete, onPreview } = props;
-  if (session.items.length === 0) {
-    return (
-      <div className="board-empty feed-empty">
-        <div className="empty-orbit"><span /><span /><span /><Icon name="message" size={26} /></div>
-        <h3>아직 등록된 의견이 없습니다</h3>
-        <p>아래에서 첫 의견을 작성해 주세요.</p>
-      </div>
-    );
-  }
-  if (items.length === 0) {
-    return <div className="search-empty"><Icon name="search" size={24} /><strong>일치하는 의견이 없습니다</strong></div>;
-  }
-  return (
-    <div className="feed-view">
-      <div className="feed-date"><span>오늘</span></div>
-      {[...items].reverse().map((entry) => (
-        <div className="feed-row" key={entry.id}>
-          <span className="avatar feed-avatar" style={{ background: entry.authorColor }}>{entry.authorName.slice(-1)}</span>
-          <div className="feed-copy">
-            <span><strong>{entry.authorName}</strong><small>{formatTime(entry.createdAt)}</small></span>
-            <IdeaCard
-              item={entry}
-              selected={entry.id === selectedItemId}
-              canDelete={entry.authorId === currentParticipantId || session.hostId === currentParticipantId}
-              onSelect={() => onSelect(entry.id)}
-              onDelete={() => onDelete(entry.id)}
-              onPreview={() => onPreview(entry)}
+          {relations.map((relation) => (
+            <path
+              className="relation-path"
+              d={relation.path}
+              key={relation.id}
+              stroke={relation.color}
             />
-          </div>
+          ))}
+        </svg>
+
+        <div className={`topic-node ${session.title.length > 8 ? "wide" : ""}`} id="map-topic" title={session.topic}>
+          <span>{session.title}</span>
         </div>
-      ))}
-    </div>
-  );
-}
 
-interface IdeaCardProps {
-  item: OpinionItem;
-  selected: boolean;
-  compact?: boolean;
-  canDelete: boolean;
-  onSelect: () => void;
-  onDelete: () => void;
-  onPreview: () => void;
-}
+        {items.map((item, index) => {
+          const position = NODE_POSITIONS[index];
+          if (!position) return null;
+          const palette = clusterFor(item.cluster);
+          const relation = relations.find((entry) => entry.indices.includes(index));
+          const kindIcon: IconName = item.kind === "LINK" ? "link" : item.kind === "FILE" ? "file" : "text";
+          return (
+            <button
+              className={`idea-node ${relation ? "related" : ""}`}
+              key={item.id}
+              onClick={() => onOpenItem(item)}
+              style={{
+                left: `${(position.x / MAP_SIZE.width) * 100}%`,
+                top: `${(position.y / MAP_SIZE.height) * 100}%`,
+                "--node-color": palette.color,
+                "--node-fill": palette.fill,
+                "--relation-color": relation?.color ?? "transparent",
+              } as CSSProperties}
+              aria-label={`${palette.label}, ${getItemLabel(item)}, ${item.authorName}`}
+              title={`${getItemLabel(item)} · ${item.authorName}`}
+            >
+              {item.kind !== "TEXT" && <Icon name={kindIcon} size={16} />}
+              <span>{getItemLabel(item)}</span>
+            </button>
+          );
+        })}
 
-function IdeaCard({ item, selected, compact = false, canDelete, onSelect, onDelete, onPreview }: IdeaCardProps) {
-  return (
-    <article
-      className={`idea-card ${selected ? "selected" : ""} ${compact ? "compact" : ""}`}
-      onClick={onSelect}
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") onSelect();
-      }}
-    >
-      <div className="idea-card-top">
-        <span className="idea-author"><i style={{ background: item.authorColor }} />{item.authorName}</span>
-        <span className={`kind-pill ${item.kind.toLowerCase()}`}>
-          <Icon name={item.kind === "TEXT" ? "text" : item.kind === "LINK" ? "link" : "file"} size={11} />
-          {item.kind === "TEXT" ? "의견" : item.kind === "LINK" ? "링크" : "파일"}
-        </span>
-      </div>
-      <p className="idea-content">{item.content || (item.file ? item.file.name : "설명 없는 파일")}</p>
-      {item.url && (
-        <a className="link-preview" href={item.url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
-          <span className="link-favicon"><Icon name="globe" size={14} /></span>
-          <span><small>REFERENCE</small><strong>{getDomain(item.url)}</strong></span>
-          <Icon name="external" size={13} />
-        </a>
-      )}
-      {item.file && (
-        <button className="file-preview" onClick={(event) => { event.stopPropagation(); onPreview(); }}>
-          <span className="file-type">{item.file.name.split(".").pop()?.slice(0, 4).toUpperCase() || "FILE"}</span>
-          <span><strong>{item.file.name}</strong><small>{formatFileSize(item.file.size)} · {item.file.previewable ? "미리보기" : "다운로드"}</small></span>
-          <Icon name={item.file.previewable ? "chevron" : "download"} size={14} />
-        </button>
-      )}
-      <div className="idea-card-footer">
-        <span>{formatTime(item.createdAt)}</span>
-        <span className="idea-reactions">
-          {item.reactions.agree > 0 && <span><Icon name="heart" size={12} /> {item.reactions.agree}</span>}
-          {item.reactions.curious > 0 && <span><Icon name="help" size={12} /> {item.reactions.curious}</span>}
-        </span>
-        {canDelete && (
-          <button className="delete-idea" aria-label="의견 삭제" title="의견 삭제" onClick={(event) => { event.stopPropagation(); onDelete(); }}>
-            <Icon name="trash" size={13} />
+        {stage === 2 && relations.map((relation) => (
+          <span
+            className="relation-label"
+            key={`${relation.id}-label`}
+            style={{
+              left: `${(relation.x / MAP_SIZE.width) * 100}%`,
+              top: `${(relation.y / MAP_SIZE.height) * 100}%`,
+              "--relation-color": relation.color,
+            } as CSSProperties}
+            title={`${relation.label} · ${relation.confidence}% 일치`}
+          >
+            {relation.label}
+            <small>{relation.confidence}%</small>
+          </span>
+        ))}
+
+        {cursorIndices.map((index) => {
+          const item = items[index]!;
+          const position = NODE_POSITIONS[index]!;
+          const participant = session.participants.find((entry) => entry.id === item.authorId);
+          const cursorColor = clusterFor(item.cluster).color;
+          return (
+            <div
+              className={`collab-cursor ${stage === 2 ? "muted" : ""}`}
+              key={`cursor-${item.id}`}
+              style={{
+                left: `${Math.min(96, (position.x / MAP_SIZE.width) * 100 + (index % 2 === 0 ? 7 : 5))}%`,
+                top: `${Math.min(91, (position.y / MAP_SIZE.height) * 100 + 7)}%`,
+                color: cursorColor,
+              }}
+              aria-hidden="true"
+            >
+              <svg viewBox="0 0 25 31"><path d="M2 1.5 22 18l-8.2 1 4.4 8.8-4.8 2.2-4.2-9-6.4 5.5Z" /></svg>
+              <span style={{ background: cursorColor }}>{participantInitial(participant, item)}</span>
+            </div>
+          );
+        })}
+
+        {items.length === 0 && stage === 1 && (
+          <button className="empty-add" onClick={onOpenComposer}>
+            <Icon name="plus" size={16} /> 첫 의견 추가하기
           </button>
         )}
+
+        {stage === 2 && isAnalysing && (
+          <div className="analysis-pulse" aria-hidden="true"><Icon name="sparkles" size={22} /></div>
+        )}
       </div>
-    </article>
+
+      <p className="stage-caption" aria-live="polite">
+        {stage === 2 && isAnalysing && <span className="inline-spinner" />}
+        <span>{caption}</span>
+        {stage === 1 && <b>({items.length}/6)</b>}
+      </p>
+    </section>
   );
 }
 
-function Composer({ sessionId, onSubmit }: { sessionId: string; onSubmit: (input: CreateItemInput) => Promise<boolean> }) {
+interface DecisionStageProps {
+  session: Session;
+  analysis: AnalysisResult | null;
+  isAnalysing: boolean;
+  votingOption: string | null;
+  onAnalyse: () => void;
+  onVote: (analysisId: string, option: string) => void;
+}
+
+function DecisionStage({ session, analysis, isAnalysing, votingOption, onAnalyse, onVote }: DecisionStageProps) {
+  if (!analysis) {
+    return (
+      <section className="decision-stage decision-empty">
+        <div className="decision-empty-card">
+          <span><Icon name="sparkles" size={28} /></span>
+          <h2>선택지를 만들 분석 결과가 필요해요</h2>
+          <p>현재 의견을 분석하면 실행 가능한 방향 3개와 장단점을 비교할 수 있습니다.</p>
+          <button className="primary-action" onClick={onAnalyse} disabled={isAnalysing || session.items.length === 0}>
+            {isAnalysing ? <span className="inline-spinner light" /> : <Icon name="sparkles" size={17} />}
+            {isAnalysing ? "분석 중…" : "AI 분석 시작"}
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  const directions = analysis.directions.slice(0, 3);
+
+  return (
+    <section className="decision-stage" aria-labelledby="decision-title">
+      <h2 className="visually-hidden" id="decision-title">AI 추천 선택지 비교 및 투표</h2>
+      <div className="decision-grid">
+        {directions.map((direction, index) => {
+          const option = analysis.prompt.options[index] ?? `선택지 ${index + 1}`;
+          const voteCount = analysis.prompt.votes[option] ?? 0;
+          const selected = analysis.prompt.currentParticipantVote === option;
+          const voters = Array.from(
+            { length: Math.min(voteCount, 3) },
+            (_, voterIndex) => session.participants[(index * 2 + voterIndex) % Math.max(1, session.participants.length)],
+          ).filter((participant): participant is Participant => Boolean(participant));
+          const isRecommended = index === 0;
+
+          return (
+            <article className={`decision-card ${isRecommended ? "recommended" : ""} ${selected ? "selected" : ""}`} key={direction.id}>
+              <div className="card-badges">
+                <span className="option-number">선택지 {index + 1}</span>
+                <span className="badge-spacer" />
+                {isRecommended && <span className="recommend-badge"><Icon name="sparkles" size={13} /> AI 추천</span>}
+                {selected && <span className="selected-badge"><Icon name="check" size={14} /> 내 선택</span>}
+              </div>
+
+              <h3>{direction.title}</h3>
+              <div className="participation-summary">
+                <div className="avatar-stack" aria-label={`${voteCount}표`}>
+                  {voters.map((participant, voterIndex) => (
+                    <span className="participant-avatar" style={{ background: participant.color }} key={`${participant.id}-${voterIndex}`} title={participant.name}>
+                      {participant.initials.slice(0, 1)}
+                    </span>
+                  ))}
+                </div>
+                <span>{voteCount > 0 ? `의견 ${voteCount}명 참여` : "첫 투표를 기다리는 중"}</span>
+                <small>실행 점수 {direction.score}</small>
+              </div>
+
+              <div className="card-rule" />
+              <dl className="pros-cons">
+                <div>
+                  <dt className="pro">장점</dt>
+                  <dd>{direction.description}</dd>
+                </div>
+                <div>
+                  <dt className="con">단점</dt>
+                  <dd>{DISADVANTAGES[index] ?? "실행 전에 범위와 필요한 자원을 확인해야 해요."}</dd>
+                </div>
+              </dl>
+
+              <button
+                className="vote-button"
+                onClick={() => onVote(analysis.id, option)}
+                disabled={votingOption !== null}
+                aria-pressed={selected}
+                aria-label={`${direction.title}, ${option}에 투표`}
+              >
+                <span>{selected ? <Icon name="check" size={15} /> : null}{votingOption === option ? "반영 중…" : selected ? "선택됨" : `${option} · 투표`}</span>
+                <b>{voteCount}표</b>
+              </button>
+            </article>
+          );
+        })}
+      </div>
+      <p className="stage-caption decision-caption">AI가 선택지와 장단점을 정리하면, 팀원이 투표로 결정해요</p>
+    </section>
+  );
+}
+
+interface IdeaComposerModalProps {
+  session: Session;
+  onClose: () => void;
+  onSubmit: (input: CreateItemInput) => Promise<boolean>;
+}
+
+function IdeaComposerModal({ session, onClose, onSubmit }: IdeaComposerModalProps) {
   const [mode, setMode] = useState<ItemKind>("TEXT");
   const [content, setContent] = useState("");
   const [url, setUrl] = useState("");
@@ -953,23 +1048,23 @@ function Composer({ sessionId, onSubmit }: { sessionId: string; onSubmit: (input
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
+  const formRef = useDialogFocus<HTMLFormElement>(onClose);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    setContent("");
-    setUrl("");
-    setFile(null);
-    setError(null);
-  }, [sessionId]);
+  const urlValid = /^https?:\/\/\S+$/i.test(url.trim());
+  const canSubmit = mode === "TEXT"
+    ? content.trim().length > 0
+    : mode === "LINK"
+      ? content.trim().length > 0 && urlValid
+      : file !== null;
 
-  const switchMode = (nextMode: ItemKind) => {
-    setMode(nextMode);
+  const chooseMode = (next: ItemKind) => {
+    setMode(next);
     setError(null);
-    if (nextMode !== "FILE") setFile(null);
+    if (next !== "FILE") setFile(null);
   };
 
-  const handleFile = (selected: File | null) => {
+  const chooseFile = (selected: File | null) => {
     if (!selected) return;
     if (selected.size > MAX_FILE_SIZE_BYTES) {
       setFile(null);
@@ -981,17 +1076,16 @@ function Composer({ sessionId, onSubmit }: { sessionId: string; onSubmit: (input
     setError(null);
   };
 
-  const canSubmit = mode === "TEXT"
-    ? content.trim().length > 0
-    : mode === "LINK"
-      ? content.trim().length > 0 && /^https?:\/\//i.test(url)
-      : file !== null;
-
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (mode === "LINK" && !urlValid) {
+      setError("http:// 또는 https://로 시작하는 링크를 입력해 주세요.");
+      return;
+    }
     if (!canSubmit || submitting) return;
     setSubmitting(true);
     setError(null);
+
     let input: CreateItemInput;
     if (mode === "TEXT") {
       input = { kind: "TEXT", content: content.trim(), cluster };
@@ -1009,326 +1103,224 @@ function Composer({ sessionId, onSubmit }: { sessionId: string; onSubmit: (input
         file: { name: file.name, size: file.size, mimeType: file.type || "application/octet-stream" },
       };
     }
-    const success = await onSubmit(input);
-    if (success) {
-      setContent("");
-      setUrl("");
-      setFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+
+    const successful = await onSubmit(input);
     setSubmitting(false);
+    if (successful) onClose();
   };
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+  const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
       formRef.current?.requestSubmit();
     }
   };
 
   return (
-    <form className="composer" ref={formRef} onSubmit={submit}>
-      <div className="composer-modes" aria-label="의견 형식">
-        <button type="button" className={mode === "TEXT" ? "active" : ""} onClick={() => switchMode("TEXT")}><Icon name="text" size={14} /> 텍스트</button>
-        <button type="button" className={mode === "LINK" ? "active" : ""} onClick={() => switchMode("LINK")}><Icon name="link" size={14} /> 링크</button>
-        <button type="button" className={mode === "FILE" ? "active" : ""} onClick={() => switchMode("FILE")}><Icon name="file" size={14} /> 파일</button>
-      </div>
-      <div className="composer-main">
-        <span className="avatar composer-avatar">나</span>
-        <div className="composer-fields">
-          {mode === "LINK" && (
-            <div className="url-input-row"><Icon name="link" size={15} /><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https:// 참고 링크 주소" aria-label="링크 주소" /></div>
-          )}
-          {mode === "FILE" && !file && (
-            <button type="button" className="file-drop-button" onClick={() => fileInputRef.current?.click()}>
-              <Icon name="upload" size={18} /> <span><strong>파일 선택</strong><small>모든 형식 · 최대 20 MB</small></span>
-            </button>
-          )}
-          {mode === "FILE" && file && (
-            <div className="selected-file">
-              <span className="selected-file-icon"><Icon name="file" size={17} /></span>
-              <span><strong>{file.name}</strong><small>{formatFileSize(file.size)}</small></span>
-              <button type="button" onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }} aria-label="파일 선택 취소"><Icon name="x" size={14} /></button>
-            </div>
-          )}
-          <input ref={fileInputRef} className="visually-hidden" type="file" onChange={(event) => handleFile(event.target.files?.[0] ?? null)} />
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <form className="modal-card composer-modal" ref={formRef} onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="composer-title" tabIndex={-1}>
+        <ModalHeader kicker={session.title} title="마인드맵에 의견 추가" description={session.topic} onClose={onClose} titleId="composer-title" />
+
+        <fieldset className="mode-picker">
+          <legend className="visually-hidden">의견 형식</legend>
+          {(["TEXT", "LINK", "FILE"] as ItemKind[]).map((entry) => {
+            const label = entry === "TEXT" ? "텍스트" : entry === "LINK" ? "링크" : "파일";
+            const icon: IconName = entry === "TEXT" ? "text" : entry === "LINK" ? "link" : "file";
+            return (
+              <button type="button" className={mode === entry ? "active" : ""} onClick={() => chooseMode(entry)} aria-pressed={mode === entry} key={entry}>
+                <Icon name={icon} size={15} /> {label}
+              </button>
+            );
+          })}
+        </fieldset>
+
+        {mode === "LINK" && (
+          <label className="field-label" htmlFor="idea-url">
+            참고 링크
+            <input
+              id="idea-url"
+              type="url"
+              value={url}
+              onChange={(event) => { setUrl(event.target.value); setError(null); }}
+              onBlur={() => { if (url && !urlValid) setError("http:// 또는 https://로 시작하는 링크를 입력해 주세요."); }}
+              placeholder="https://example.com"
+              autoFocus
+            />
+          </label>
+        )}
+
+        {mode === "FILE" && (
+          <div className="file-field">
+            <span className="field-title">첨부 파일</span>
+            <input
+              className="visually-hidden"
+              id="idea-file"
+              ref={fileInputRef}
+              type="file"
+              onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
+            />
+            {file ? (
+              <div className="selected-file">
+                <span><Icon name="file" size={18} /></span>
+                <div><strong>{file.name}</strong><small>{formatFileSize(file.size)}</small></div>
+                <button type="button" onClick={() => { setFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }} aria-label="파일 선택 취소"><Icon name="close" size={15} /></button>
+              </div>
+            ) : (
+              <label className="file-picker" htmlFor="idea-file">
+                <Icon name="upload" size={22} />
+                <span><strong>파일 선택</strong><small>모든 형식 · 최대 20 MB</small></span>
+              </label>
+            )}
+          </div>
+        )}
+
+        <label className="field-label" htmlFor="idea-content">
+          {mode === "TEXT" ? "의견" : "설명"}
           <textarea
+            id="idea-content"
             value={content}
             onChange={(event) => setContent(event.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={mode === "TEXT" ? "생각을 자유롭게 남겨보세요…" : mode === "LINK" ? "이 링크를 공유하는 이유를 적어주세요…" : "파일에 대한 설명을 덧붙여 주세요 (선택)"}
-            rows={mode === "TEXT" ? 2 : 1}
-            aria-label="의견 내용"
+            onKeyDown={handleComposerKeyDown}
+            placeholder={mode === "TEXT" ? "축제를 다시 찾게 만들 아이디어를 적어보세요." : mode === "LINK" ? "이 링크가 논의에 필요한 이유를 적어주세요." : "파일의 핵심 내용을 덧붙여 주세요. (선택)"}
+            rows={3}
+            maxLength={1_000}
+            autoFocus={mode === "TEXT"}
           />
-          {error && <span className="composer-error">{error}</span>}
-        </div>
-        <button type="submit" className="send-button" disabled={!canSubmit || submitting} aria-label="의견 보내기">
-          {submitting ? <span className="button-spinner" /> : <Icon name="send" size={18} />}
-        </button>
-      </div>
-      <div className="composer-footer">
-        <label>연결 위치
-          <select value={cluster} onChange={(event) => setCluster(event.target.value as ClusterId)}>
+        </label>
+
+        <label className="field-label compact-field" htmlFor="idea-cluster">
+          연결 위치
+          <select id="idea-cluster" value={cluster} onChange={(event) => setCluster(event.target.value as ClusterId)}>
             {CLUSTERS.map((entry) => <option value={entry.id} key={entry.id}>{entry.label}</option>)}
           </select>
         </label>
-        <span><kbd>Ctrl</kbd> + <kbd>Enter</kbd>로 보내기</span>
-      </div>
-    </form>
-  );
-}
 
-interface InsightPanelProps {
-  session: Session;
-  analysis: AnalysisResult | null;
-  selectedItem: OpinionItem | null;
-  tab: InsightTab;
-  isAnalysing: boolean;
-  onTabChange: (tab: InsightTab) => void;
-  onAnalyse: () => void;
-  onVote: (analysisId: string, option: string) => void;
-  onSelectItem: (itemId: string) => void;
-  onClose: () => void;
-}
-
-function InsightPanel(props: InsightPanelProps) {
-  const { session, analysis, selectedItem, tab, isAnalysing, onTabChange, onAnalyse, onVote, onSelectItem, onClose } = props;
-  return (
-    <aside className="insight-panel" aria-label="인사이트 패널">
-      <div className="insight-header">
-        <div className="insight-tabs">
-          <button className={tab === "analysis" ? "active" : ""} onClick={() => onTabChange("analysis")}>
-            <Icon name="sparkles" size={15} /> AI 인사이트
-          </button>
-          <button className={tab === "activity" ? "active" : ""} onClick={() => onTabChange("activity")}>
-            <Icon name="activity" size={15} /> 활동
-          </button>
-        </div>
-        <button className="icon-button" onClick={onClose} aria-label="인사이트 패널 닫기"><Icon name="x" size={17} /></button>
-      </div>
-
-      {tab === "analysis" ? (
-        <div className="insight-scroll">
-          {selectedItem && (
-            <div className="selected-context">
-              <span style={{ background: selectedItem.authorColor }} />
-              <div><small>선택한 의견</small><strong>{selectedItem.content || selectedItem.file?.name}</strong></div>
-              <button onClick={() => onSelectItem(selectedItem.id)} aria-label="선택 의견으로 이동"><Icon name="arrow" size={14} /></button>
-            </div>
-          )}
-
-          {isAnalysing ? (
-            <AnalysisSkeleton />
-          ) : analysis ? (
-            <>
-              <div className="analysis-hero">
-                <span className="ai-orb"><Icon name="sparkles" size={18} /></span>
-                <div><span>BMPS SYNTHESIS</span><strong>{analysis.snapshotItemIds.length}개 의견 분석 완료</strong><small>{formatTime(analysis.createdAt)}</small></div>
-              </div>
-
-              <section className="insight-section summary-section">
-                <div className="section-label"><span>요약</span><i /></div>
-                <p>{analysis.flowSummary}</p>
-              </section>
-
-              <section className="insight-section">
-                <div className="section-title-row">
-                  <div className="section-label"><span>연결 가능성</span><i /></div>
-                  <small>{analysis.linkCandidates.length}개 발견</small>
-                </div>
-                {analysis.linkCandidates.length > 0 ? analysis.linkCandidates.map((candidate) => (
-                  <div className="connection-card" key={candidate.id}>
-                    <div className="connection-card-top">
-                      <div className="linked-dots">
-                        {candidate.itemIds.slice(0, 3).map((itemId, index) => {
-                          const linkedItem = session.items.find((entry) => entry.id === itemId);
-                          return <button key={itemId} style={{ background: linkedItem?.authorColor ?? "#8892a8", zIndex: 4 - index }} onClick={() => onSelectItem(itemId)} aria-label="연결 의견 선택">{index + 1}</button>;
-                        })}
-                      </div>
-                      <span className="confidence">{candidate.confidence}% 일치</span>
-                    </div>
-                    <strong>{candidate.label}</strong>
-                    <p>{candidate.rationale}</p>
-                    <button className="text-action" onClick={() => candidate.itemIds[0] && onSelectItem(candidate.itemIds[0])}>연결된 의견 보기 <Icon name="arrow" size={13} /></button>
-                  </div>
-                )) : <div className="mini-empty">의견이 더 모이면 연결 후보를 찾을 수 있어요.</div>}
-              </section>
-
-              <section className="insight-section direction-section">
-                <div className="section-title-row">
-                  <div className="section-label"><span>추천 방향</span><i /></div>
-                  <small>실행 가능성 순</small>
-                </div>
-                <div className="direction-list">
-                  {analysis.directions.map((direction, index) => (
-                    <div className={`direction-card ${index === 0 ? "best" : ""}`} key={direction.id}>
-                      <span className="direction-rank">{String(index + 1).padStart(2, "0")}</span>
-                      <div><strong>{direction.title}</strong><p>{direction.description}</p></div>
-                      <span className="direction-score">{direction.score}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="vote-card">
-                <span className="vote-eyebrow"><Icon name="message" size={13} /> 함께 결정하기</span>
-                <strong>{analysis.prompt.question}</strong>
-                <div className="vote-options">
-                  {analysis.prompt.options.map((option) => {
-                    const selected = analysis.prompt.currentParticipantVote === option;
-                    return (
-                      <button className={selected ? "selected" : ""} key={option} onClick={() => onVote(analysis.id, option)}>
-                        <span>{selected && <Icon name="check" size={12} />}{option}</span>
-                        <b>{analysis.prompt.votes[option] ?? 0}</b>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <button className="analyse-button full" onClick={onAnalyse}>
-                <Icon name="sparkles" size={16} /> 현재 의견으로 다시 분석
-              </button>
-              <p className="analysis-note"><Icon name="lock" size={11} /> 분석 결과는 제안이며, 참여자의 확인을 거쳐 반영됩니다.</p>
-            </>
-          ) : (
-            <div className="analysis-empty">
-              <div className="analysis-empty-visual"><Icon name="sparkles" size={25} /><span /><span /></div>
-              <span>AI SYNTHESIS</span>
-              <h3>흩어진 생각을<br />하나의 흐름으로</h3>
-              <p>현재 {session.items.length}개 의견의 연결점과 실행 방향을 찾아드릴게요.</p>
-              <button className="analyse-button full" onClick={onAnalyse} disabled={session.items.length === 0}>
-                <Icon name="sparkles" size={16} /> 지금 분석하기
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <ActivityView session={session} />
-      )}
-    </aside>
-  );
-}
-
-function AnalysisSkeleton() {
-  return (
-    <div className="analysis-loading">
-      <div className="thinking-orb"><Icon name="sparkles" size={22} /><span /><span /></div>
-      <strong>의견 사이의 연결을 찾고 있어요</strong>
-      <p>반복되는 주제와 실행 가능한 방향을 정리합니다.</p>
-      <div className="skeleton-lines"><i /><i /><i /></div>
-      <div className="skeleton-card"><i /><i /><i /></div>
-    </div>
-  );
-}
-
-function ActivityView({ session }: { session: Session }) {
-  const activities = [
-    ...session.items.map((entry) => ({ id: entry.id, time: entry.createdAt, title: `${entry.authorName}님이 의견을 추가했어요`, detail: entry.content || entry.file?.name || "파일", color: entry.authorColor, icon: entry.kind === "FILE" ? "file" as const : entry.kind === "LINK" ? "link" as const : "message" as const })),
-    ...session.analyses.map((entry) => ({ id: entry.id, time: entry.createdAt, title: "AI 분석이 완료되었어요", detail: `${entry.snapshotItemIds.length}개 의견에서 방향 후보를 찾았습니다.`, color: "#6c5ce7", icon: "sparkles" as const })),
-  ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);
-
-  return (
-    <div className="activity-scroll">
-      <section className="people-section">
-        <div className="section-title-row"><strong>참여자</strong><small>{session.participants.filter((entry) => entry.online).length}명 온라인</small></div>
-        <div className="people-grid">
-          {session.participants.map((participant) => (
-            <div className="person-chip" key={participant.id}>
-              <span className="avatar" style={{ background: participant.color }}>{participant.initials}</span>
-              <span><strong>{participant.name}</strong><small>{participant.online ? "지금 참여 중" : "오프라인"}</small></span>
-              <i className={participant.online ? "online" : ""} />
-            </div>
-          ))}
-        </div>
-      </section>
-      <section className="activity-section">
-        <div className="section-title-row"><strong>최근 활동</strong><small>자동 업데이트</small></div>
-        <div className="activity-list">
-          {activities.map((activity) => (
-            <div className="activity-item" key={activity.id}>
-              <span className="activity-icon" style={{ color: activity.color, background: `${activity.color}14` }}><Icon name={activity.icon} size={14} /></span>
-              <div><strong>{activity.title}</strong><p>{activity.detail}</p><small>{formatTime(activity.time)}</small></div>
-            </div>
-          ))}
-          {activities.length === 0 && <div className="mini-empty">아직 활동이 없습니다.</div>}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function CreateSessionModal({ onClose, onCreate }: { onClose: () => void; onCreate: (input: CreateSessionInput) => Promise<void> }) {
-  const [title, setTitle] = useState("");
-  const [topic, setTopic] = useState("");
-  const [policy, setPolicy] = useState<AccessPolicy>("LINK_ONLY");
-  const [submitting, setSubmitting] = useState(false);
-  const valid = title.trim().length >= 2 && topic.trim().length >= 2;
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!valid || submitting) return;
-    setSubmitting(true);
-    try {
-      await onCreate({ title: title.trim(), topic: topic.trim(), accessPolicy: policy });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <form className="modal-card create-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="create-session-title">
-        <div className="modal-header">
-          <div><span className="modal-kicker">NEW WORKSPACE</span><h2 id="create-session-title">새 브레인스토밍 시작</h2><p>하나의 질문에서 함께 생각을 확장합니다.</p></div>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="닫기"><Icon name="x" /></button>
-        </div>
-        <label className="field-label">세션 이름<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 새로운 서비스 아이디어" maxLength={60} /></label>
-        <label className="field-label">함께 풀 질문<textarea value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="예: 혼자 사는 사람의 저녁 시간을 어떻게 더 즐겁게 만들까?" rows={3} maxLength={140} /></label>
-        <fieldset className="access-fieldset">
-          <legend>참여 방식</legend>
-          <button type="button" className={policy === "LINK_ONLY" ? "selected" : ""} onClick={() => setPolicy("LINK_ONLY")}>
-            <span className="policy-icon"><Icon name="lock" size={17} /></span><span><strong>링크 전용</strong><small>초대 링크를 받은 사람만 참여</small></span>{policy === "LINK_ONLY" && <Icon name="check" size={16} />}
-          </button>
-          <button type="button" className={policy === "PUBLIC" ? "selected" : ""} onClick={() => setPolicy("PUBLIC")}>
-            <span className="policy-icon"><Icon name="globe" size={17} /></span><span><strong>공개 세션</strong><small>누구나 찾아서 참여</small></span>{policy === "PUBLIC" && <Icon name="check" size={16} />}
-          </button>
-        </fieldset>
+        {error && <p className="form-error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button type="button" className="secondary-button" onClick={onClose}>취소</button>
-          <button type="submit" className="primary-button" disabled={!valid || submitting}>{submitting ? "만드는 중…" : "세션 만들기"}<Icon name="arrow" size={15} /></button>
+          <span><kbd>Ctrl</kbd> + <kbd>Enter</kbd>로 추가</span>
+          <button type="button" className="secondary-action" onClick={onClose}>취소</button>
+          <button type="submit" className="primary-action" disabled={!canSubmit || submitting}>
+            {submitting ? <span className="inline-spinner light" /> : <Icon name="send" size={16} />}
+            {submitting ? "추가 중…" : "의견 추가"}
+          </button>
         </div>
       </form>
     </div>
   );
 }
 
+function CreateSessionModal({ onClose, onCreate }: { onClose: () => void; onCreate: (input: CreateSessionInput) => Promise<boolean> }) {
+  const [title, setTitle] = useState("");
+  const [topic, setTopic] = useState("");
+  const [accessPolicy, setAccessPolicy] = useState<AccessPolicy>("LINK_ONLY");
+  const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useDialogFocus<HTMLFormElement>(onClose);
+  const valid = title.trim().length >= 2 && topic.trim().length >= 2;
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!valid || submitting) return;
+    setSubmitting(true);
+    await onCreate({ title: title.trim(), topic: topic.trim(), accessPolicy });
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <form ref={dialogRef} className="modal-card create-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="create-title" tabIndex={-1}>
+        <ModalHeader kicker="BMPS · NEW SESSION" title="새 브레인스토밍" description="하나의 질문에서 함께 생각을 확장합니다." onClose={onClose} titleId="create-title" />
+        <label className="field-label" htmlFor="session-title">세션 이름<input id="session-title" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={60} placeholder="예: 지역 축제 리브랜딩" /></label>
+        <label className="field-label" htmlFor="session-topic">함께 풀 질문<textarea id="session-topic" value={topic} onChange={(event) => setTopic(event.target.value)} maxLength={140} rows={3} placeholder="예: 주민과 방문객이 다시 찾는 축제를 어떻게 만들까?" /></label>
+        <fieldset className="access-options">
+          <legend>참여 방식</legend>
+          <label className={accessPolicy === "LINK_ONLY" ? "selected" : ""}>
+            <input className="visually-hidden" type="radio" name="access" checked={accessPolicy === "LINK_ONLY"} onChange={() => setAccessPolicy("LINK_ONLY")} />
+            <span><Icon name="lock" size={17} /></span><strong>링크 전용<small>초대받은 사람만 참여</small></strong>{accessPolicy === "LINK_ONLY" && <Icon name="check" size={16} />}
+          </label>
+          <label className={accessPolicy === "PUBLIC" ? "selected" : ""}>
+            <input className="visually-hidden" type="radio" name="access" checked={accessPolicy === "PUBLIC"} onChange={() => setAccessPolicy("PUBLIC")} />
+            <span><Icon name="globe" size={17} /></span><strong>공개 세션<small>누구나 찾아서 참여</small></strong>{accessPolicy === "PUBLIC" && <Icon name="check" size={16} />}
+          </label>
+        </fieldset>
+        <div className="modal-actions simple">
+          <button type="button" className="secondary-action" onClick={onClose}>취소</button>
+          <button type="submit" className="primary-action" disabled={!valid || submitting}>{submitting ? "만드는 중…" : "세션 만들기"}<Icon name="arrow" size={15} /></button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ModalHeader({ kicker, title, description, onClose, titleId }: { kicker: string; title: string; description: string; onClose: () => void; titleId: string }) {
+  return (
+    <div className="modal-header">
+      <div><span>{kicker}</span><h2 id={titleId}>{title}</h2><p>{description}</p></div>
+      <button type="button" className="close-button" onClick={onClose} aria-label="닫기"><Icon name="close" size={19} /></button>
+    </div>
+  );
+}
+
+interface ItemDetailModalProps {
+  item: OpinionItem;
+  session: Session;
+  currentParticipantId: string;
+  onClose: () => void;
+  onDelete: () => Promise<void>;
+  onPreview: () => void;
+}
+
+function ItemDetailModal({ item, session, currentParticipantId, onClose, onDelete, onPreview }: ItemDetailModalProps) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(onClose);
+  const palette = clusterFor(item.cluster);
+  const canDelete = item.authorId === currentParticipantId || session.hostId === currentParticipantId;
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialogRef} className="modal-card detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-title" tabIndex={-1}>
+        <div className="detail-top">
+          <span className="detail-cluster" style={{ color: palette.color, background: palette.fill }}>{palette.label}</span>
+          <button className="close-button" onClick={onClose} aria-label="닫기"><Icon name="close" size={19} /></button>
+        </div>
+        <h2 id="detail-title">{getItemLabel(item)}</h2>
+        {item.content && item.kind !== "TEXT" && <p className="detail-description">{item.content}</p>}
+        <div className="detail-meta"><span style={{ background: item.authorColor }}>{item.authorName.slice(-1)}</span><strong>{item.authorName}</strong><small>{formatTime(item.createdAt)}</small></div>
+        {item.url && <a className="resource-row" href={item.url} target="_blank" rel="noreferrer"><Icon name="link" size={18} /><span><small>참고 링크</small><strong>{getDomain(item.url)}</strong></span><Icon name="external" size={16} /></a>}
+        {item.file && <button className="resource-row" onClick={onPreview}><Icon name="file" size={18} /><span><small>{formatFileSize(item.file.size)}</small><strong>{item.file.name}</strong></span><span>{item.file.previewable ? "미리보기" : "정보 보기"}</span></button>}
+        <div className="detail-actions">
+          <button className="secondary-action" onClick={onClose}>닫기</button>
+          {canDelete && <button className="danger-action" onClick={() => void onDelete()}><Icon name="trash" size={15} /> 의견 삭제</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FilePreviewModal({ item, onClose }: { item: OpinionItem; onClose: () => void }) {
+  const dialogRef = useDialogFocus<HTMLDivElement>(onClose);
   const file = item.file;
   if (!file) return null;
+  const extension = file.name.split(".").pop()?.toUpperCase() || "FILE";
   return (
-    <div className="modal-backdrop file-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div className="modal-card file-modal" role="dialog" aria-modal="true" aria-label={`${file.name} 미리보기`}>
-        <div className="file-modal-toolbar">
-          <div><span className="file-type small">{file.name.split(".").pop()?.toUpperCase()}</span><span><strong>{file.name}</strong><small>{formatFileSize(file.size)} · 안전 검사 완료</small></span></div>
-          <div><button className="secondary-button"><Icon name="download" size={15} /> 내려받기</button><button className="icon-button" onClick={onClose} aria-label="닫기"><Icon name="x" /></button></div>
+    <div className="modal-backdrop preview-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialogRef} className="modal-card preview-modal" role="dialog" aria-modal="true" aria-labelledby="preview-title" tabIndex={-1}>
+        <div className="preview-toolbar">
+          <span className="file-extension">{extension.slice(0, 4)}</span>
+          <div><h2 id="preview-title">{file.name}</h2><p>{formatFileSize(file.size)} · {file.mimeType}</p></div>
+          <button className="close-button" onClick={onClose} aria-label="미리보기 닫기"><Icon name="close" size={20} /></button>
         </div>
         {file.previewable ? (
-          <div className="document-preview">
-            <div className="document-page">
-              <div className="doc-brand">BMPS · FIELD NOTE</div>
-              <h3>현장 인터뷰 인사이트</h3>
-              <p className="doc-lead">지역 축제 참여자와 상인 인터뷰에서 반복해서 등장한 핵심 내용을 정리했습니다.</p>
-              <div className="doc-rule" />
-              <div className="doc-stat-row"><span><b>12</b>명 인터뷰</span><span><b>3</b>개 공통 주제</span><span><b>8</b>개 실행 단서</span></div>
+          <div className="preview-canvas">
+            <article className="preview-sheet">
+              <span>BMPS · FIELD NOTE</span>
+              <h3>지역 축제 현장 인터뷰</h3>
+              <p>주민과 방문객이 다시 찾는 지속 가능한 동네 축제를 위한 공통 의견을 정리했습니다.</p>
+              <hr />
+              <div className="preview-stats"><span><b>12</b>명 인터뷰</span><span><b>3</b>개 공통 주제</span><span><b>8</b>개 실행 단서</span></div>
               <h4>반복해서 등장한 이야기</h4>
-              <div className="doc-quote">“낮에 한 번 보고 끝나는 행사가 아니라, 저녁에도 다시 오고 싶은 이유가 있었으면 해요.”</div>
-              <div className="doc-lines"><i /><i /><i /><i /></div>
-            </div>
-            <span className="preview-notice"><Icon name="check" size={13} /> 샌드박스된 데모 미리보기</span>
+              <blockquote>“낮에 한 번 보고 끝나는 행사가 아니라, 저녁에도 다시 오고 싶은 이유가 있었으면 해요.”</blockquote>
+            </article>
           </div>
         ) : (
-          <div className="download-only"><span><Icon name="download" size={30} /></span><h3>이 파일은 바로 표시할 수 없습니다</h3><p>안전하게 내려받은 뒤 기기에서 열어 주세요.</p><button className="primary-button"><Icon name="download" size={16} /> 파일 내려받기</button></div>
+          <div className="preview-unavailable"><span><Icon name="file" size={31} /></span><h3>미리보기를 지원하지 않는 형식입니다</h3><p>파일 이름, 크기, 형식 메타데이터만 안전하게 표시합니다.</p></div>
         )}
       </div>
     </div>
@@ -1337,10 +1329,10 @@ function FilePreviewModal({ item, onClose }: { item: OpinionItem; onClose: () =>
 
 function Toast({ message, tone, onClose }: { message: string; tone: ToastTone; onClose: () => void }) {
   return (
-    <div className={`toast ${tone}`} role="status">
-      <span className="toast-icon"><Icon name={tone === "error" ? "x" : tone === "info" ? "activity" : "check"} size={15} /></span>
-      <span>{message}</span>
-      <button onClick={onClose} aria-label="알림 닫기"><Icon name="x" size={14} /></button>
+    <div className={`toast ${tone}`} role={tone === "error" ? "alert" : "status"}>
+      <span><Icon name={tone === "error" ? "close" : tone === "info" ? "sparkles" : "check"} size={15} /></span>
+      <p>{message}</p>
+      <button onClick={onClose} aria-label="알림 닫기"><Icon name="close" size={14} /></button>
     </div>
   );
 }

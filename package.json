@@ -12,15 +12,20 @@
     "build": "npm run build --workspaces --if-present",
     "check": "npm run check --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "verify": "npm run check && npm test && npm run build",
+    "dev": "concurrently -k -n API,WEB -c green,cyan \"npm run dev:server\" \"npm run dev:web\"",
+    "demo": "npm run dev",
+    "seed": "npm run seed --workspace @bmps/demo-seed",
     "dev:server": "npm run dev --workspace @bmps/server",
     "dev:web": "npm run dev --workspace @bmps/web"
   },
   "engines": {
-    "node": ">=22",
+    "node": ">=20",
     "npm": ">=10"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "concurrently": "^9.1.2",
     "typescript": "^5.0.0"
   }
 }
